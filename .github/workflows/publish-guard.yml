@@ -1,0 +1,23 @@
+# Publishes the guard to npm with provenance (trusted publishing, no npm token stored).
+# Manual only; run it after the version in guard/package.json was bumped and reviewed.
+name: publish guard
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: tests first
+        run: node --test guard/test/*.test.mjs
+      - name: publish
+        working-directory: guard
+        run: npm publish --provenance --access public

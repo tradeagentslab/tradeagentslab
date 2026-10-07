@@ -1,0 +1,22 @@
+# The arena's front door. Deployed by the "deploy arena worker" workflow, never by hand.
+# Renaming the site means changing the domain in `routes` below.
+name = "arena"
+main = "index.js"
+compatibility_date = "2026-10-01"
+workers_dev = false # only on the site's own domain, no *.workers.dev address
+
+routes = [{ pattern = "tradeagentslab.com/api/arena/*", zone_name = "tradeagentslab.com" }]
+
+[vars]
+# The engine's public signing key (base64, 32 bytes). Public by design: it only
+# lets the Worker check that a bundle came from the engine. Filled in at setup.
+ENGINE_PUBKEY = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tal"
+database_id = "00000000-0000-0000-0000-000000000000" # written by the workflow
+
+# Logs would include request bodies; nothing here needs them.
+[observability]
+enabled = false

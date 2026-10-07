@@ -1,0 +1,8 @@
+{
+  "api": "https://tradeagentslab.com/api/arena/v0",
+  "home": "/var/lib/arena",
+  "roster": "/etc/arena/roster.json",
+  "season": { "id": "S1", "from": "2026-10-28T00:00:00Z", "to": "2026-12-01T00:00:00Z" },
+  "pollSec": 20,
+  "priceSource": "binance"
+}

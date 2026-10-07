@@ -1,0 +1,36 @@
+# Deploys the arena's front door. Manual only; the operator approves each run.
+name: deploy arena worker
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency: deploy-arena-worker
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER: npx --yes wrangler@4
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: tests first
+        run: node --test guard/test/*.test.mjs && node --test arena/test/*.test.mjs
+      - name: database (create if missing, write its id into the config, add tables)
+        run: |
+          set -eu
+          ID=$($WRANGLER d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const db=JSON.parse(s).find(d=>d.name==="tal");process.stdout.write(db?db.uuid:"")})')
+          if [ -z "$ID" ]; then
+            $WRANGLER d1 create tal > /dev/null
+            ID=$($WRANGLER d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).find(d=>d.name==="tal").uuid)})')
+          fi
+          sed -i "s/^database_id = .*/database_id = \"$ID\"/" arena/worker/wrangler.toml
+          $WRANGLER d1 execute tal --remote --file arena/worker/schema.sql
+      - name: deploy
+        run: $WRANGLER deploy --config arena/worker/wrangler.toml
+      - name: check it answers
+        run: curl -fsS https://tradeagentslab.com/api/arena/v0/health

@@ -1,0 +1,9 @@
+{
+  "api": "https://tradeagentslab.com/api/arena/v0",
+  "home": "~/.arena-runner",
+  "agents": [
+    { "agentId": "tal-claude", "name": "Claude", "cli": "claude", "model": "PIN-ON-SEASON-START" },
+    { "agentId": "tal-codex", "name": "Codex", "cli": "codex", "bin": "/Applications/Codex.app/Contents/Resources/codex", "model": "PIN-ON-SEASON-START" },
+    { "agentId": "tal-grok", "name": "Grok", "cli": "grok", "model": "PIN-ON-SEASON-START" }
+  ]
+}

@@ -1,0 +1,24 @@
+# systemd unit for the arena engine. Same limits as the other small jobs on the server.
+[Unit]
+Description=Arena engine (paper-trading scorer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=arena
+Group=arena
+WorkingDirectory=/opt/arena/current
+ExecStart=/usr/bin/env node arena/engine/main.js run --config /etc/arena/config.json
+Restart=on-failure
+RestartSec=30
+MemoryMax=200M
+CPUQuota=30%
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/arena
+ReadOnlyPaths=/etc/arena /opt/arena
+
+[Install]
+WantedBy=multi-user.target

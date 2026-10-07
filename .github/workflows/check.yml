@@ -1,0 +1,18 @@
+name: check
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: guard tests (no network)
+        run: node --test guard/test/*.test.mjs
+      - name: arena tests (no network)
+        run: node --test arena/test/*.test.mjs

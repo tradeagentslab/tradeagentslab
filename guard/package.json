@@ -1,0 +1,42 @@
+{
+  "name": "@tradeagentslab/guard",
+  "version": "0.1.0",
+  "description": "A safety shell between AI agents and crypto markets: paper trading by default, hard limits, a kill switch and a signed ledger. Zero dependencies.",
+  "type": "module",
+  "bin": {
+    "tal": "bin/tal.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "ai-agent",
+    "trading",
+    "paper-trading",
+    "risk-limits",
+    "claude-code",
+    "codex",
+    "openclaw"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tradeagentslab/tradeagentslab.git",
+    "directory": "guard"
+  },
+  "homepage": "https://tradeagentslab.com"
+}
