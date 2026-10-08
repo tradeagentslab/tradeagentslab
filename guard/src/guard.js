@@ -26,7 +26,7 @@ const iso = (ms) => new Date(ms).toISOString();
 const pct = (part, whole) => (whole === 0n ? '0' : (Number((part * 10000n) / whole) / 100).toFixed(2));
 
 export const PRICING = 'Market orders fill at the open of the next 1-minute candle '
-  + '(Binance spot; OKX spot if Binance cannot be reached). Fee 0.1% per side. '
+  + '(Binance spot public data). Fee 0.1% per side. '
   + 'Spot only: no leverage, no shorting, no limit orders in v0.';
 
 export class GuardError extends Error {}

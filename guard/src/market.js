@@ -1,5 +1,7 @@
-// Public market data: candles from Binance spot, OKX spot as the fallback.
-// No keys, no accounts. Prices stay strings until money.js parses them.
+// Public market data: candles from one exchange's public API (Binance spot by
+// default). There is no fallback to another exchange: if the chosen source can't
+// be reached, the caller gets a clear error. No keys, no accounts. Prices stay
+// strings until money.js parses them.
 
 const HOSTS = {
   binance: 'https://data-api.binance.vision',
@@ -14,11 +16,11 @@ const OKX_BAR = { '1m': '1m', '15m': '15m', '1h': '1H', '4h': '4H', '1d': '1Dutc
 const okxInst = (symbol) => `${symbol.slice(0, -4)}-USDT`;
 
 /**
- * source: 'binance' | 'okx' (the other one is the fallback).
+ * source: 'binance' | 'okx' — the only place asked; never the other one.
  * fetchImpl: injectable for tests. now: clock.
  */
 export function createMarket({ source = 'binance', fetchImpl = globalThis.fetch, userAgent = 'guard', now = Date.now, cacheMs = 5000, hosts = HOSTS } = {}) {
-  const order = source === 'okx' ? ['okx', 'binance'] : ['binance', 'okx'];
+  if (!['binance', 'okx'].includes(source)) throw new RangeError('source must be binance or okx');
   const cache = new Map();
 
   let lastAt = 0; // when the newest answer was actually fetched (cache hits keep the old time)
@@ -68,15 +70,13 @@ export function createMarket({ source = 'binance', fetchImpl = globalThis.fetch,
 
   async function candles(symbol, interval = '1m', { startTime = null, limit = 1 } = {}) {
     if (!INTERVALS[interval]) throw new RangeError(`interval must be one of ${Object.keys(INTERVALS).join(', ')}`);
-    let lastErr;
-    for (const src of order) {
-      try {
-        return { source: src, candles: await fetchers[src](symbol, interval, { startTime, limit }) };
-      } catch (err) {
-        lastErr = err;
-      }
+    try {
+      return { source, candles: await fetchers[source](symbol, interval, { startTime, limit }) };
+    } catch (err) {
+      // Errors that carry meaning for the caller (rate limits, bans) pass through untouched.
+      if (err?.gate) throw err;
+      throw new Error(`no market data for ${symbol}: ${err?.message}`);
     }
-    throw new Error(`no market data for ${symbol}: ${lastErr?.message}`);
   }
 
   return {

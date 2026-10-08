@@ -2,7 +2,7 @@
 // an engine loop with its own key, and a roster with one house agent.
 
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,6 +21,7 @@ export function world({ roster: customRoster, baselines = [] } = {}) {
   const clock = { t: T0 + 10_000 };
   const env = { DB: d1([fileURLToPath(new URL('../worker/schema.sql', import.meta.url))]) };
   let dropReply = false;
+  const binance = { asked: [], next: [] }; // every Binance request (url, time, headers); scripted replies
   const fetchImpl = async (url, init = {}) => {
     if (url.startsWith(API)) {
       const res = await handle(new Request(url, init), env, clock.t);
@@ -32,6 +33,9 @@ export function world({ roster: customRoster, baselines = [] } = {}) {
     }
     const u = new URL(url);
     if (u.host === 'data-api.binance.vision') {
+      binance.asked.push({ url, t: clock.t, headers: init.headers ?? {} });
+      const scripted = binance.next.shift();
+      if (scripted) return new Response(JSON.stringify(scripted.body ?? {}), { status: scripted.status, headers: scripted.headers ?? {} });
       const q = u.searchParams;
       const step = { '1h': 3_600_000, '1d': 86_400_000 }[q.get('interval')] ?? 60_000;
       const limit = Number(q.get('limit'));
@@ -46,6 +50,8 @@ export function world({ roster: customRoster, baselines = [] } = {}) {
     return new Response('{}', { status: 404 });
   };
   const home = mkdtempSync(join(tmpdir(), 'arena-e2e-'));
+  const pauseDir = join(home, 'binance-guard');
+  mkdirSync(pauseDir);
   const agentKey = generateKeyPairSync('ed25519').privateKey;
   const roster = join(home, 'roster.json');
   writeFileSync(roster, JSON.stringify(customRoster ?? [
@@ -53,11 +59,22 @@ export function world({ roster: customRoster, baselines = [] } = {}) {
     { agentId: 'bad-name', name: 'SignalBot', model: 'm', pubkey: publicRaw(agentKey) },
   ]));
   const logs = [];
+  const http = [];
   const loop = new EngineLoop({
-    config: { api: API, home, roster, baselines, season: { id: 'S1', from: T0, to: Date.parse('2026-12-01T00:00:00Z') }, pollSec: 20, priceSource: 'binance', source: 'test arena' },
-    fetchImpl, now: () => clock.t, log: (s) => logs.push(s),
+    config: { api: API, home, roster, baselines, pauseDir, season: { id: 'S1', from: T0, to: Date.parse('2026-12-01T00:00:00Z') }, pollSec: 20, priceSource: 'binance', source: 'test arena' },
+    fetchImpl, now: () => clock.t, log: (s) => logs.push(s), out: (s) => http.push(s),
   });
+  // Rounds every 20 s, like the service, until the engine has settled up to its target and published a snapshot.
+  const catchUp = async (max = 50) => {
+    for (let i = 0; i < max; i++) {
+      await loop.once();
+      const target = Math.floor((clock.t - 20_000) / 60_000) * 60_000 - 60_000;
+      if (loop.s.snapshot && (loop.arena.minute ?? -Infinity) >= Math.min(target, loop.arena.season.to - 60_000)) return i + 1;
+      clock.t += 20_000;
+    }
+    throw new Error('engine did not catch up');
+  };
   env.ENGINE_PUBKEY = loop.pubkey();
   const get = async (path) => (await fetchImpl(`${API}${path}`)).json();
-  return { clock, env, loop, agentKey, logs, get, fetchImpl, loseNextReply: () => { dropReply = true; } };
+  return { clock, env, loop, agentKey, logs, http, binance, pauseDir, home, get, fetchImpl, catchUp, loseNextReply: () => { dropReply = true; } };
 }

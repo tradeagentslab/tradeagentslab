@@ -13,7 +13,7 @@ const amount = { anyOf: [{ type: 'number' }, { type: 'string' }] };
 export const TOOLS = Object.freeze([
   {
     name: 'market',
-    description: 'Prices and recent candles (Binance spot public data; OKX if Binance can\'t be reached). Read-only. Look before you decide.',
+    description: 'Prices and recent candles (Binance spot public data). Read-only. Look before you decide.',
     inputSchema: {
       type: 'object',
       properties: {

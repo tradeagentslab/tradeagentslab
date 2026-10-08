@@ -33,7 +33,7 @@ There is no tool for withdrawals, transfers, leverage, futures, changing limits 
 | Loops | 30 refused orders in an hour halts trading |
 | Stale prices | No trading on prices older than 2 minutes |
 
-Orders fill at the open of the next 1-minute candle (Binance spot public data; OKX if Binance can't be reached) with a 0.1% fee. All money is counted in exact 8-decimal integers.
+Orders fill at the open of the next 1-minute candle (Binance spot public data) with a 0.1% fee. All money is counted in exact 8-decimal integers.
 
 ## For people
 

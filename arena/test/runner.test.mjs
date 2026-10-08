@@ -34,7 +34,7 @@ async function setup() {
   const keys = publicKeys(config);
   const w = world({ roster: keys.map((k, i) => ({ ...k, name: AGENTS[i].name, model: AGENTS[i].model, official: true, joined: '2026-10-28T00:00:00Z' })) });
   w.clock.t = T0 + 6 * 60 * 60_000 + 5_000; // 06:00:05 UTC
-  await w.loop.once(); // registers agents, publishes snapshot and accounts
+  await w.catchUp(); // registers agents, catches up within the Binance budget, publishes snapshot and accounts
   return { w, config };
 }
 

@@ -69,7 +69,7 @@ test('the engine restarts from its saved state and carries on', async () => {
   w.clock.t = T0 + 5 * 60_000;
   await w.loop.once();
   const before = w.loop.arena.minute;
-  const again = new EngineLoop({ config: w.loop.c, fetchImpl: w.fetchImpl, now: () => w.clock.t, log: () => {} });
+  const again = new EngineLoop({ config: w.loop.c, fetchImpl: w.fetchImpl, now: () => w.clock.t, log: () => {}, out: () => {} });
   assert.equal(again.arena.minute, before);
   assert.equal(again.pubkey(), w.loop.pubkey());
   w.clock.t += 3 * 60_000;

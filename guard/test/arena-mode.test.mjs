@@ -20,7 +20,7 @@ async function setup({ register = true } = {}) {
   const entry = await probe.signup({ name: 'My Bot', model: 'Some Model 1' });
   const w = world({ roster: register ? [{ ...entry, joined: '2026-10-28T00:00:00Z' }] : [] });
   w.clock.t = clock.t;
-  await w.loop.once();
+  await w.catchUp(); // six hours of candles, fetched within the engine's Binance budget
   const guard = new ArenaGuard({ root, market: new FakeMarket(w.clock), now: () => w.clock.t, fetchImpl: w.fetchImpl });
   return { w, guard, root };
 }

@@ -48,33 +48,35 @@ test('openAt before the minute starts is null, without asking anyone', async () 
   assert.equal(fetch.asked.length, 0);
 });
 
-test('binance down → OKX answers; OKX rows are newest first and get sorted', async () => {
+test('binance down → one clear error, and no other exchange is ever asked', async () => {
+  const fetch = fakeFetch([[/binance/, {}, 451], [/okx/, { code: '0', data: [] }]]);
+  const m = createMarket({ fetchImpl: fetch, now: () => T });
+  await assert.rejects(m.latest(['BTCUSDT']), /no market data for BTCUSDT: HTTP 451/);
+  assert.equal(fetch.asked.length, 1);
+  assert.ok(fetch.asked.every((u) => u.startsWith('https://data-api.binance.vision/')));
+});
+
+test('price_source okx (opt-in) asks only OKX; its rows are newest first and get sorted', async () => {
   const t1 = M('2026-10-08T12:00:00Z');
   const fetch = fakeFetch([
-    [/binance/, {}, 451],
     [/okx\.com\/api\/v5\/market\/candles\?instId=BTC-USDT&bar=1m&limit=2/, {
       code: '0', msg: '', data: [[String(t1 + 60_000), '2', '2', '2', '2', '1'], [String(t1), '1', '1', '1', '1', '1']],
     }],
   ]);
-  const m = createMarket({ fetchImpl: fetch, now: () => T });
+  const m = createMarket({ source: 'okx', fetchImpl: fetch, now: () => T });
   const r = await m.candles('BTCUSDT', '1m', { limit: 2 });
   assert.equal(r.source, 'okx');
   assert.deepEqual(r.candles.map((k) => k.o), ['1', '2']);
+  assert.ok(fetch.asked.every((u) => !/binance/.test(u)));
 });
 
 test('OKX openAt pages with `after` and keeps only the asked minute', async () => {
   const t = M('2026-10-08T12:01:00Z');
   const fetch = fakeFetch([
-    [/binance/, {}, 500],
     [new RegExp(`okx.*candles\\?instId=ETH-USDT&bar=1m&limit=1&after=${t + 60_000}`), { code: '0', data: [[String(t), '2500.1', '1', '1', '1', '1']] }],
   ]);
-  const m = createMarket({ fetchImpl: fetch, now: () => t + 3000 });
+  const m = createMarket({ source: 'okx', fetchImpl: fetch, now: () => t + 3000 });
   assert.deepEqual(await m.openAt('ETHUSDT', t), { price: '2500.1', source: 'okx' });
-});
-
-test('both down → one clear error', async () => {
-  const m = createMarket({ fetchImpl: fakeFetch([[/./, {}, 503]]), now: () => T });
-  await assert.rejects(m.latest(['BTCUSDT']), /no market data for BTCUSDT/);
 });
 
 test('answers are cached for a few seconds', async () => {

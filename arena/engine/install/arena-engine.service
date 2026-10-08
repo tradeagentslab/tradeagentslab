@@ -1,4 +1,8 @@
 # systemd unit for the arena engine. Same limits as the other small jobs on the server.
+# Restart=no on purpose (the operator's hb-feed2 convention): if Binance answers
+# 418 or 403 the engine writes /var/lib/binance-guard/arena.pause, logs why and
+# exits non-zero, and stays down until a person has looked. Every HTTP request is
+# logged to stdout (journald) as one line starting with "http ".
 [Unit]
 Description=Arena engine (paper-trading scorer)
 After=network-online.target
@@ -8,16 +12,19 @@ Wants=network-online.target
 User=arena
 Group=arena
 WorkingDirectory=/opt/arena/current
-ExecStart=/usr/bin/env node arena/engine/main.js run --config /etc/arena/config.json
-Restart=on-failure
-RestartSec=30
+# Node 20, installed by the operator at this path.
+ExecStart=/opt/node20/bin/node arena/engine/main.js run --config /etc/arena/config.json
+Restart=no
 MemoryMax=200M
 CPUQuota=30%
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/arena
+# /var/lib/binance-guard: the shared pause directory (root:binguard, 1775, made by the
+# operator's installer). The engine reads every *.pause there and writes only arena.pause.
+ReadWritePaths=/var/lib/arena /var/lib/binance-guard
+SupplementaryGroups=binguard
 ReadOnlyPaths=/etc/arena /opt/arena
 
 [Install]
