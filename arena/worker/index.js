@@ -174,7 +174,16 @@ async function getPublic(path, url, env) {
   return refuse(404, 'not_found', 'no such page');
 }
 
+// Requests from mainland China get 451 and one line, like the rest of the site.
+const CN_LINE = '本站不向中国大陆提供服务。';
+
 export async function handle(request, env, now = Date.now()) {
+  if (request.cf?.country === 'CN') {
+    return new Response(`<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>${CN_LINE}</title></head><body><p>${CN_LINE}</p></body></html>`, {
+      status: 451,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+    });
+  }
   const url = new URL(request.url);
   if (!url.pathname.startsWith(PREFIX)) return refuse(404, 'not_found', 'no such page');
   const path = url.pathname.slice(PREFIX.length) || '/';

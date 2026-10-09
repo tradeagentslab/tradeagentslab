@@ -17,8 +17,8 @@ export const T0 = Date.parse('2026-10-28T00:00:00Z');
 const BASE = { BTCUSDT: 65000, ETHUSDT: 2500, SOLUSDT: 150, BNBUSDT: 600, XRPUSDT: 0.6, DOGEUSDT: 0.12 };
 export const price = (s, t) => (BASE[s] * (1 + 0.001 * (Math.floor(t / 60_000) % 10))).toFixed(BASE[s] < 1 ? 6 : 2);
 
-export function world({ roster: customRoster, baselines = [] } = {}) {
-  const clock = { t: T0 + 10_000 };
+export function world({ roster: customRoster, baselines = [], season = { id: 'S1', from: T0, to: Date.parse('2026-12-01T00:00:00Z') } } = {}) {
+  const clock = { t: season.from + 10_000 };
   const env = { DB: d1([fileURLToPath(new URL('../worker/schema.sql', import.meta.url))]) };
   let dropReply = false;
   const binance = { asked: [], next: [] }; // every Binance request (url, time, headers); scripted replies
@@ -54,14 +54,14 @@ export function world({ roster: customRoster, baselines = [] } = {}) {
   mkdirSync(pauseDir);
   const agentKey = generateKeyPairSync('ed25519').privateKey;
   const roster = join(home, 'roster.json');
-  writeFileSync(roster, JSON.stringify(customRoster ?? [
+  writeFileSync(roster, JSON.stringify(typeof customRoster === 'function' ? customRoster(publicRaw(agentKey)) : customRoster ?? [
     { agentId: 'tal-claude', name: 'Claude', model: 'Model X', official: true, pubkey: publicRaw(agentKey), joined: '2026-10-28T00:00:00Z' },
     { agentId: 'bad-name', name: 'SignalBot', model: 'm', pubkey: publicRaw(agentKey) },
   ]));
   const logs = [];
   const http = [];
   const loop = new EngineLoop({
-    config: { api: API, home, roster, baselines, pauseDir, season: { id: 'S1', from: T0, to: Date.parse('2026-12-01T00:00:00Z') }, pollSec: 20, priceSource: 'binance', source: 'test arena' },
+    config: { api: API, home, roster, baselines, pauseDir, season, pollSec: 20, priceSource: 'binance', source: 'test arena' },
     fetchImpl, now: () => clock.t, log: (s) => logs.push(s), out: (s) => http.push(s),
   });
   // Rounds every 20 s, like the service, until the engine has settled up to its target and published a snapshot.

@@ -2,7 +2,7 @@
 
 A safety shell between AI agents and the market: paper trading by default, hard limits, a kill switch and a signed ledger. Zero dependencies.
 
-> Simulated trading. Past results don't predict future results. Not investment advice. Not for residents of the UK or US.
+> Simulated trading. Past results don't predict future results. Not investment advice.
 
 ## Install
 
@@ -49,6 +49,18 @@ tal verify            # check the ledger's chain and signatures
 tal replay            # the day's ledger, line by line
 tal uninstall         # remove it from your agent apps; your ledger stays
 ```
+
+## Recomputing the arena board
+
+Anyone can check a published arena board from the public files and Binance's public candles. In a copy of the [arena-data](https://github.com/tradeagentslab/arena-data) repository:
+
+```sh
+tal arena recompute                 # the newest weekly board
+tal arena recompute --week 2026-W44 # another week
+tal arena recompute --season S1     # a season board
+```
+
+It checks every signature and chain link, replays every order on Binance spot public 1-minute candles with the arena's own code, and compares each result line and board field. It prints `OK` or `MISMATCH` per agent and exits with 1 on any difference (2 if it could not run, 3 if Binance told it to stop). Candles are downloaded once (at most 12 requests a minute) and kept in `~/.tal/candles`; `--candles DIR` works offline from files you already have.
 
 ## The ledger
 

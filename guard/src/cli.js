@@ -8,6 +8,9 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 
 import { ArenaGuard } from './arena-guard.js';
+import { BannedError } from './arena/binance-gate.js';
+import { createKlines, MissingCandlesError } from './arena/klines.js';
+import { formatReport, recompute, RecomputeInputError } from './arena/recompute.js';
 import { BRAND, ENV_HOME } from './brand.js';
 import { homeDir, loadConfig, pathsFor, saveConfig } from './config.js';
 import { Guard } from './guard.js';
@@ -36,6 +39,9 @@ const T = {
   ${BRAND.short} verify            check the ledger chain and signatures
   ${BRAND.short} replay [--date YYYY-MM-DD]   the day's ledger, line by line
   ${BRAND.short} arena join --name NAME --model MODEL   what to send to sign up for the arena
+  ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID] [--candles DIR]
+                     recompute a published arena board from its signed ledgers
+                     and Binance public candles, and show anything that differs
   ${BRAND.short} venue [paper|arena]  show or switch where orders go (asks you to type yes)
   ${BRAND.short} uninstall [--dry-run]       remove it from your apps (keeps your ledger)
   ${BRAND.short} serve             (the apps run this) MCP server on stdio`,
@@ -73,6 +79,8 @@ const T = {
   ${BRAND.short} verify            核对账本的链和签名
   ${BRAND.short} replay [--date YYYY-MM-DD]   按时间回放那一天的账本
   ${BRAND.short} arena join --name 名字 --model 模型   报名擂台要发的内容
+  ${BRAND.short} arena recompute [--data 目录] [--week YYYY-Www | --season 季] [--candles 目录]
+                     用签名账本和币安公开 K 线复算公开的擂台榜，列出对不上的地方
   ${BRAND.short} venue [paper|arena]  看或换单子发到哪（要你打字确认）
   ${BRAND.short} uninstall [--dry-run]       从代理软件里删掉（账本留着）
   ${BRAND.short} serve             （代理软件自己跑）MCP 服务`,
@@ -262,6 +270,7 @@ export async function main(argv, io = defaultIo) {
       }
 
       case 'arena': {
+        if (f._[1] === 'recompute') return await arenaRecompute(f, io, root);
         if (f._[1] !== 'join' || typeof f.name !== 'string' || typeof f.model !== 'string') throw new Error(t.joinUsage);
         const cfg = loadConfig(root);
         const p = pathsFor(root, cfg.agent);
@@ -334,6 +343,57 @@ export async function main(argv, io = defaultIo) {
   } catch (err) {
     io.err(`${BRAND.short}: ${err.message}`);
     return 1;
+  }
+}
+
+const RECOMPUTE_USAGE = `usage: ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID]
+       [--candles DIR (offline) | --cache DIR] [--arena-key BASE64] [--season-from ISO] [--json] [--verbose]`;
+
+/** Exit codes: 0 everything matches, 1 something differs, 2 cannot recompute, 3 Binance asked us to stop. */
+async function arenaRecompute(f, io, root) {
+  const str = (k) => (typeof f[k] === 'string' ? f[k] : undefined);
+  if (f.help) {
+    io.out(RECOMPUTE_USAGE);
+    return 0;
+  }
+  const dir = str('data') ?? '.';
+  let arenaKey = str('arena-key');
+  if (!arenaKey && existsSync(join(dir, 'config.json'))) {
+    try {
+      arenaKey = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')).arenaKey || undefined;
+    } catch { /* fall through to the error below */ }
+  }
+  const offline = str('candles') != null;
+  const klines = createKlines({
+    dir: str('candles') ?? str('cache') ?? join(root, 'candles'),
+    offline,
+    fetchImpl: io.fetch ?? globalThis.fetch,
+    now: io.now,
+    sleep: io.sleep,
+    userAgent: `tal-recompute/${VERSION}`,
+    log: (s) => io.err(s),
+    http: f.verbose ? (s) => io.err(s) : () => {},
+  });
+  try {
+    const rep = await recompute({
+      dir, week: str('week'), season: str('season'), seasonFrom: str('season-from'), arenaKey, klines,
+      progress: (s) => { if (!f.json) io.err(`... ${s}`); },
+    });
+    if (f.json) io.out(JSON.stringify(rep, null, 2));
+    else for (const line of formatReport(rep)) io.out(line);
+    return rep.ok ? 0 : 1;
+  } catch (err) {
+    if (err instanceof BannedError) {
+      io.err(`${BRAND.short}: ${err.message}`);
+      return 3;
+    }
+    if (err instanceof RecomputeInputError || err instanceof MissingCandlesError) {
+      io.err(`${BRAND.short}: ${err.message}${err instanceof MissingCandlesError ? ' (offline: --candles never downloads; use --cache DIR to download what is missing)' : ''}`);
+      io.err(RECOMPUTE_USAGE);
+      return 2;
+    }
+    io.err(`${BRAND.short}: could not finish the recompute: ${err.message}`);
+    return 2;
   }
 }
 

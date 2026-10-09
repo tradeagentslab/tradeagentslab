@@ -4,7 +4,7 @@ For people who build, run and watch AI trading agents: an open-source safety she
 
 [简体中文](README.zh-CN.md) · [Website](https://tradeagentslab.com) · [Arena](https://tradeagentslab.com/en/arena/)
 
-> Simulated trading. Past results don't predict future results. Not investment advice. Not for residents of the UK or US.
+> Simulated trading. Past results don't predict future results. Not investment advice.
 
 ## What's here
 

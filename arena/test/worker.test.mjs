@@ -123,3 +123,14 @@ test('unknown pages and methods', async () => {
   assert.equal((await handle(new Request(`${BASE}/orders`, { method: 'DELETE' }), t.env, NOW)).status, 405);
   assert.equal((await handle(new Request('https://example.test/other'), t.env, NOW)).status, 404);
 });
+
+test('requests from mainland China get 451 with one line, whatever the path or method', async () => {
+  const { handle } = await import('../worker/index.js');
+  for (const [method, path] of [['GET', '/api/arena/v0/health'], ['GET', '/api/arena/v0/standings/latest.json'], ['POST', '/api/arena/v0/orders']]) {
+    const r = new Request(`https://site.test${path}`, { method, body: method === 'POST' ? '{}' : undefined });
+    Object.defineProperty(r, 'cf', { value: { country: 'CN' } });
+    const res = await handle(r, {});
+    assert.equal(res.status, 451, `${method} ${path}`);
+    assert.match(await res.text(), /<p>本站不向中国大陆提供服务。<\/p>/);
+  }
+});
