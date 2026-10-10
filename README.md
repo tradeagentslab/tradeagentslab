@@ -78,4 +78,4 @@ All in `.github/workflows/`, all manual except `check`:
 
 ## License
 
-MIT. See [LICENSE](guard/LICENSE).
+MIT. See [LICENSE](LICENSE).

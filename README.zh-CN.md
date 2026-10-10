@@ -78,4 +78,4 @@ cd arena && node --test test/*.test.mjs
 
 ## 许可
 
-MIT，见 [LICENSE](guard/LICENSE)。
+MIT，见 [LICENSE](LICENSE)。
