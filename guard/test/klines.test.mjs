@@ -1,7 +1,7 @@
 // The candle store used by `tal arena recompute`. No network: a fake Binance.
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -88,4 +88,28 @@ test('offline: never asks, reads Binance CSV files, names what is missing', asyn
   await assert.rejects(k.range('ETHUSDT', '1m', D0, D0 + DAY), (err) => err instanceof MissingCandlesError && /ETHUSDT 1m 2026-11-02/.test(err.message));
   assert.equal(calls, 0);
   assert.equal(parseBinanceCsv('open_time,open\n').length, 0, 'a header line is skipped');
+});
+
+test('a gap in Binance\'s candles: each minute saved once, the gap stays a gap', async () => {
+  const clock = { t: D0 + 3 * DAY };
+  const gap = new Set([D0 + 500 * MINUTE, D0 + 501 * MINUTE, D0 + 502 * MINUTE]); // e.g. an exchange outage
+  const asked = [];
+  const fetchImpl = async (url) => {
+    const u = new URL(url);
+    asked.push(url);
+    const start = Number(u.searchParams.get('startTime'));
+    const limit = Number(u.searchParams.get('limit'));
+    const rows = [];
+    // Like Binance: `limit` candles from startTime on, skipping minutes that have none.
+    for (let t = start; rows.length < limit && t <= clock.t; t += MINUTE) if (!gap.has(t)) rows.push([t, '1', '1', '1', '1', '5', t + MINUTE - 1]);
+    return new Response(JSON.stringify(rows));
+  };
+  const dir = mkdtempSync(join(tmpdir(), 'klines-gap-'));
+  const k = createKlines({ dir, fetchImpl, now: () => clock.t, sleep: async (ms) => { clock.t += ms; } });
+  const m = await k.range('BTCUSDT', '1m', D0, D0 + DAY);
+  assert.equal(m.size, 1440 - 3);
+  assert.equal(asked.length, 2);
+  const saved = JSON.parse(readFileSync(join(dir, 'BTCUSDT', '1m', '2026-11-02.json'), 'utf8'));
+  assert.equal(saved.length, 1440 - 3, 'no minute saved twice');
+  assert.equal(new Set(saved.map((r) => r[0])).size, saved.length);
 });

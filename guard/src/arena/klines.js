@@ -117,8 +117,12 @@ export function createKlines({
     const byDay = new Map();
     for (let t = from; t < end; t += PER_REQUEST * step) {
       const n = Math.min(PER_REQUEST, Math.ceil((end - t) / step));
+      // Keep only this request's own span: when Binance has no candle for some minutes
+      // inside it, it fills the reply with candles from after the span, which the
+      // next request fetches again (they used to be saved twice).
+      const spanEnd = Math.min(end, t + n * step);
       for (const k of await request(symbol, interval, t, n)) {
-        if (k.t < t || k.t >= end) continue;
+        if (k.t < t || k.t >= spanEnd) continue;
         const d = dayId(k.t);
         if (!byDay.has(d)) byDay.set(d, []);
         byDay.get(d).push([k.t, k.o, k.h, k.l, k.c, k.v]);

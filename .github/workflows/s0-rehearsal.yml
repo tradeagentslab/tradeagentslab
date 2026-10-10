@@ -1,0 +1,96 @@
+# S0 dress rehearsal, by hand only: a whole mini season on REAL Binance spot candles from
+# the past, with a simulated clock (arena/rehearsal/run.mjs).
+#   1. fetch: the window's 1-minute candles (6 symbols, plus the day before) and BTC daily
+#      candles from 20 days before, into .candles. The ONLY step that contacts Binance
+#      (data-api.binance.vision, public candles, no keys): at most 12 requests in any 60 s,
+#      only days not already in the cache. About 67 requests for 6 days: ~6 minutes.
+#   2. rehearsal, offline from that cache: the real engine loop and front door, three
+#      baselines, two scripted agents sending signed orders through the guard; weekly and
+#      season boards; arena-data's snapshot.mjs copies them (and a live copy mid-season);
+#      `tal arena recompute` checks every board. Fails on any mismatch.
+# Nothing is committed, uploaded, posted or deployed; read-only token. The report is in
+# the log and the job summary (simulated results on public candles only).
+#
+# Also an early test of whether GitHub's runners can reach data-api.binance.vision: if
+# not, the fetch step fails and says so (exit 4: blocked or no network; exit 3: Binance
+# answered 418/403, a pause file is kept in the cache for 2 hours).
+name: S0 rehearsal
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First day, YYYY-MM-DD (00:00 UTC). Empty: the newest Wednesday whose window is already over'
+        required: false
+        default: ''
+        type: string
+      days:
+        description: 'Season length in days (1 to 14; S0 is 6)'
+        required: false
+        default: '6'
+        type: string
+permissions:
+  contents: read
+concurrency: s0-rehearsal
+jobs:
+  rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: arena-data (its snapshot script copies the boards)
+        uses: actions/checkout@v5
+        with:
+          repository: tradeagentslab/arena-data
+          path: .arena-data
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: the window
+        env:
+          FROM: ${{ inputs.from }}
+          DAYS: ${{ inputs.days || '6' }}
+        run: |
+          set -eu
+          if ! printf '%s' "$DAYS" | grep -Eq '^([1-9]|1[0-4])$'; then echo "::error::days must be 1 to 14, got: $DAYS"; exit 1; fi
+          if [ -z "$FROM" ]; then
+            FROM=$(node --input-type=module -e "import { defaultFrom } from './arena/rehearsal/run.mjs'; console.log(new Date(defaultFrom(Date.now(), $DAYS)).toISOString().slice(0, 10))")
+          fi
+          if ! printf '%s' "$FROM" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then echo "::error::from must look like 2026-09-30, got: $FROM"; exit 1; fi
+          echo "R_FROM=$FROM" >> "$GITHUB_ENV"
+          echo "R_DAYS=$DAYS" >> "$GITHUB_ENV"
+          echo "Season window: $FROM 00:00 UTC, $DAYS days"
+      - name: candles already downloaded
+        uses: actions/cache/restore@v4
+        with:
+          path: .candles
+          key: rehearsal-candles-${{ github.run_id }}
+          restore-keys: rehearsal-candles-
+      # The only step that asks Binance anything.
+      - name: fetch candles from data-api.binance.vision
+        id: fetch
+        run: |
+          set +e
+          node arena/rehearsal/run.mjs --fetch-only --cache .candles --from "$R_FROM" --days "$R_DAYS"
+          status=$?
+          case $status in
+            0) ;;
+            4) echo "::error::GitHub's runner cannot reach data-api.binance.vision (blocked region or network); see the line above. Run the rehearsal on the arena server instead." ;;
+            3) echo "::error::Binance answered 418/403 to this runner and the fetch stopped (pause file kept in the cache). Do not retry for 2 hours." ;;
+            *) echo "::error::fetching candles failed (exit $status)" ;;
+          esac
+          exit $status
+      - name: keep the candles for next time
+        if: always() && steps.fetch.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: .candles
+          key: rehearsal-candles-${{ github.run_id }}
+      - name: rehearsal (offline, from the cached candles)
+        run: |
+          set +e
+          node arena/rehearsal/run.mjs --offline --cache .candles --from "$R_FROM" --days "$R_DAYS" \
+            --arena-data .arena-data --work "$RUNNER_TEMP/rehearsal" --json "$RUNNER_TEMP/rehearsal.json" | tee "$RUNNER_TEMP/report.txt"
+          status=${PIPESTATUS[0]}
+          { echo '```'; cat "$RUNNER_TEMP/report.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$status" != 0 ]; then echo "::error::the rehearsal failed (exit $status); see the report"; fi
+          exit "$status"
