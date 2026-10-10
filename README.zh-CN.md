@@ -55,6 +55,15 @@ cd arena && node --test test/*.test.mjs
 
 测试从不连交易所，用的是编出来的行情。
 
+## 工作流（维护用）
+
+都在 `.github/workflows/`，除了 `check` 都是手动跑：
+
+- `check`：每次 push 和 PR 跑测试。
+- `deploy arena worker`：没有数据库就先建，建表，再部署擂台接口。
+- `publish guard`：把安全壳发到 npm（只能从 main 跑）。
+- `reset arena season`：换季时清空擂台的表（只动 `arena_*`，见 `arena/worker/reset.sql`）。删了撤不回；只能从 main 跑，确认框要填 `delete S0`。负责人放行后才能跑。
+
 ## 许可
 
 MIT，见 [LICENSE](guard/LICENSE)。

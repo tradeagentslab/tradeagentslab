@@ -1,0 +1,64 @@
+# Empties the arena's tables (arena_agents, arena_orders, arena_events, arena_blobs,
+# arena_meta) in the D1 database "tal", between seasons (after S0, before S1).
+#
+# IRREVERSIBLE. Run it only after the owner has approved it in the TAL session, in
+# their own words (for S0: "允许清掉 S0 数据，换 S1"). D1 Time Travel could only roll
+# back the whole database, which would also undo the site's and the bot's tables, so
+# treat it as permanent.
+#
+# The same database also holds the docs site's clicks/blocked tables and the bot's
+# tables. This workflow runs only arena/worker/reset.sql, which touches arena_ tables
+# and nothing else (arena/test/reset.test.mjs checks that).
+#
+# Manual only, main branch only, and the "confirm" box must say exactly: delete S0
+name: reset arena season
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Irreversible. Type exactly: delete S0'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency: deploy-arena-worker
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  WRANGLER: npx --yes wrangler@4
+jobs:
+  reset:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "delete S0" ]; then
+            echo "::error::Not confirmed. Type exactly: delete S0"
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: tests first
+        run: node --test arena/test/*.test.mjs
+      - name: row counts before
+        run: |
+          set -eu
+          sql=$(grep -v '^--' arena/worker/counts.sql | tr '\n' ' ')
+          $WRANGLER d1 execute tal --remote --json --command "$sql" > before.json
+          node arena/worker/counts.mjs before.json
+      - name: delete the arena rows
+        run: |
+          set -eu
+          sql=$(grep -v '^--' arena/worker/reset.sql | tr '\n' ' ')
+          $WRANGLER d1 execute tal --remote --command "$sql"
+      - name: row counts after (all must be 0)
+        run: |
+          set -eu
+          sql=$(grep -v '^--' arena/worker/counts.sql | tr '\n' ' ')
+          $WRANGLER d1 execute tal --remote --json --command "$sql" > after.json
+          node arena/worker/counts.mjs after.json --expect-empty

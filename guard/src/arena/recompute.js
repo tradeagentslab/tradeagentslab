@@ -9,6 +9,17 @@
 //    to the end of the board's period.
 // 4. Compare every result line and every board field with what the replay made.
 //
+// Live mode (`live: true`) checks the running week's board instead (standings/latest.json,
+// as the API serves it) while the season is still on. The cut is the board's asOf: the
+// replay settles every minute before asOf and takes every order received before it,
+// then compares
+//   - every result about a minute before asOf: fills and fill-time refusals of minutes
+//     before asOf, day starts, hourly marks up to asOf, "out" lines, and the intake
+//     (taken or refused on arrival) of every order received before asOf;
+//   - every field and row of the live board.
+// The minute that starts at asOf is still in progress: its fills, its intakes and
+// anything later are left out on both sides, even if the ledger copy already has them.
+//
 // This file does no network I/O; candles come from klines.js.
 
 import { createHash } from 'node:crypto';
@@ -59,20 +70,29 @@ export function loadArenaData(dir) {
   const agents = readJson('agents.json').agents ?? [];
   const weeks = Object.fromEntries(list('weekly', /^\d{4}-W\d{2}\.json$/).map((f) => [f.slice(0, -5), readJson(`weekly/${f}`)]));
   const seasons = Object.fromEntries(list('season', /^S\d{1,3}\.json$/).map((f) => [f.slice(0, -5), readJson(`season/${f}`)]));
+  const live = existsSync(join(dir, 'standings', 'latest.json')) ? readJson('standings/latest.json') : null;
   const ledgers = [];
   for (const agent of list('ledgers', /^[a-z0-9][a-z0-9-]{2,31}$/)) {
     for (const f of list(`ledgers/${agent}`, /^\d{4}-\d{2}-\d{2}\.json$/)) {
       ledgers.push({ agent, day: f.slice(0, 10), file: `ledgers/${agent}/${f}`, doc: readJson(`ledgers/${agent}/${f}`) });
     }
   }
-  return { agents, weeks, seasons, ledgers };
+  return { agents, weeks, seasons, ledgers, live };
 }
 
-/** Which board, and the minutes to replay: [season start, end of the board's period). */
-export function planPeriod(data, { week, season, seasonFrom } = {}) {
+/**
+ * Which board, and the minutes to replay: [season start, cut). The cut is the end of the
+ * board's period for a closed board, and the board's asOf for the live one.
+ */
+export function planPeriod(data, { week, season, seasonFrom, live } = {}) {
   let kind;
   let board;
-  if (season) {
+  if (live) {
+    kind = 'live';
+    board = data.live;
+    if (!board) throw new RecomputeInputError('no standings/latest.json: copy the live board first (scripts/snapshot.mjs --live in the arena-data repository)');
+    if (board.period?.kind !== 'week') throw new RecomputeInputError('standings/latest.json is not a weekly board');
+  } else if (season) {
     kind = 'season';
     board = data.seasons[season];
     if (!board) throw new RecomputeInputError(`no season/${season}.json`);
@@ -89,11 +109,18 @@ export function planPeriod(data, { week, season, seasonFrom } = {}) {
   if (from == null) {
     // The season's first week starts with the season; later weeks start on Mondays.
     const starts = Object.values(data.weeks).filter((b) => b.season === seasonId).map((b) => Date.parse(b.period.from));
+    if (kind === 'live') starts.push(Date.parse(board.period.from));
     from = Math.min(...starts);
   }
   const to = Date.parse(board.period.to);
   if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) throw new RecomputeInputError('cannot tell when the season starts; pass --season-from');
-  return { kind, id: board.period.id, board, season: { id: seasonId, from, to } };
+  let cut = to;
+  if (kind === 'live') {
+    cut = Date.parse(board.asOf);
+    if (!Number.isFinite(cut) || cut % MINUTE !== 0 || cut > to) throw new RecomputeInputError(`the live board's asOf is not a whole minute inside its week: ${short(board.asOf)}`);
+    if (cut <= from) throw new RecomputeInputError(`the live board is as of ${board.asOf}: no minute of the season is settled yet, nothing to check`);
+  }
+  return { kind, id: board.period.id, board, season: { id: seasonId, from, to }, cut };
 }
 
 // ---------- 1 and 2: signatures and chains ----------
@@ -291,7 +318,8 @@ function replay({ plan, agents, orders, publishedIntake, candles, symbols }) {
     }
   }
 
-  const due = orders.filter((o) => o.recv < season.to).sort((a, b) => a.recv - b.recv || a.agent.localeCompare(b.agent) || a.seq - b.seq);
+  const cut = plan.cut ?? season.to;
+  const due = orders.filter((o) => o.recv < cut).sort((a, b) => a.recv - b.recv || a.agent.localeCompare(b.agent) || a.seq - b.seq);
   for (const o of due) {
     keep(arena.advance(o.recv, candles));
     const pub = publishedIntake.get(`${o.agent}#${o.seq}`);
@@ -315,28 +343,30 @@ function replay({ plan, agents, orders, publishedIntake, candles, symbols }) {
     }
     keep(evs);
   }
-  keep(arena.advance(season.to + MINUTE, candles));
+  // A closed board: settle to the period's end. The live board: every minute before asOf, not the one at asOf.
+  keep(arena.advance(plan.kind === 'live' ? cut : season.to + MINUTE, candles));
 
-  const lastMinute = season.to - MINUTE;
+  const lastMinute = cut - MINUTE;
   if (arena.minute !== lastMinute) {
     const m = arena.minute == null ? Math.floor(season.from / MINUTE) * MINUTE : arena.minute + MINUTE;
     const gone = symbols.filter((s) => candles.open(s, m) === undefined);
     throw new RecomputeInputError(`no 1-minute candle for ${gone.join(', ')} at ${iso(m)}; cannot replay past it`);
   }
-  const closed = arena.closed.find((c) => c.kind === plan.kind && c.id === plan.id);
-  const board = closed ? JSON.parse(JSON.stringify(arena.standings(plan.kind, { source: plan.board.source, closed }))) : null;
+  let board = null;
+  if (plan.kind === 'live') board = JSON.parse(JSON.stringify(arena.standings('week', { source: plan.board.source })));
+  else {
+    const closed = arena.closed.find((c) => c.kind === plan.kind && c.id === plan.id);
+    if (closed) board = JSON.parse(JSON.stringify(arena.standings(plan.kind, { source: plan.board.source, closed })));
+  }
   let fills = 0;
   for (const list of events.values()) fills += list.filter((e) => e.type === 'fill').length;
-  return { board, events, problems, notes, fills, minutes: (season.to - Math.floor(season.from / MINUTE) * MINUTE) / MINUTE };
+  return { board, events, problems, notes, fills, minutes: (cut - Math.floor(season.from / MINUTE) * MINUTE) / MINUTE };
 }
 
 // ---------- 4: comparing ----------
 
-function compareEvents(agentIds, published, recomputed, season, problems) {
-  const inRange = (type, d) => {
-    const t = eventTime(type, d);
-    return t < season.to;
-  };
+function compareEvents(agentIds, published, recomputed, cut, problems) {
+  const inRange = (type, d) => eventTime(type, d) < cut;
   for (const agent of agentIds) {
     const pub = new Map();
     for (const ev of published.get(agent) ?? []) {
@@ -421,10 +451,10 @@ function compareBoards(published, recomputed, problems) {
  * dir: a copy of the arena-data repository. arenaKey: the arena's public key (base64).
  * klines: from createKlines(). Returns a report; report.ok is true only if everything matched.
  */
-export async function recompute({ dir, week, season, seasonFrom, arenaKey, klines, symbols = [...DEFAULT_SYMBOLS], progress = () => {} }) {
+export async function recompute({ dir, week, season, seasonFrom, live = false, arenaKey, klines, symbols = [...DEFAULT_SYMBOLS], progress = () => {} }) {
   if (!arenaKey) throw new RecomputeInputError("the arena's public key is unknown: set arenaKey in config.json or pass --arena-key");
   const data = loadArenaData(dir);
-  const plan = planPeriod(data, { week, season, seasonFrom });
+  const plan = planPeriod(data, { week, season, seasonFrom, live });
   const problems = [];
   const agentsById = Object.fromEntries(data.agents.map((a) => [a.agentId, a]));
   for (const a of data.agents) {
@@ -442,7 +472,8 @@ export async function recompute({ dir, week, season, seasonFrom, arenaKey, kline
   }
 
   progress('loading 1-minute candles');
-  const { from, to } = plan.season;
+  const { from } = plan.season;
+  const to = plan.cut;
   const minutes = {};
   for (const s of symbols) minutes[s] = await klines.range(s, '1m', Math.floor(from / MINUTE) * MINUTE, to);
   const daily = data.agents.some((a) => a.agentId === MA_BASELINE) ? await klines.range('BTCUSDT', '1d', Math.floor(from / DAY) * DAY - 20 * DAY, to) : null;
@@ -452,7 +483,7 @@ export async function recompute({ dir, week, season, seasonFrom, arenaKey, kline
   const r = replay({ plan, agents: data.agents, orders: orders.replayable, publishedIntake, candles, symbols });
   problems.push(...r.problems);
   const agentIds = [...new Set([...data.agents.map((a) => a.agentId), ...results.byAgent.keys()])];
-  compareEvents(agentIds, results.byAgent, r.events, plan.season, problems);
+  compareEvents(agentIds, results.byAgent, r.events, plan.cut, problems);
   compareBoards(plan.board, r.board, problems);
 
   // One line per agent on either board.
@@ -471,6 +502,7 @@ export async function recompute({ dir, week, season, seasonFrom, arenaKey, kline
     kind: plan.kind,
     id: plan.id,
     season: { id: plan.season.id, from: iso(plan.season.from), to: iso(plan.season.to) },
+    asOf: plan.kind === 'live' ? iso(plan.cut) : null,
     counts: {
       agents: data.agents.length,
       orderLines: orders.lines,
@@ -501,7 +533,9 @@ export function formatReport(rep, { maxPerAgent = 10 } = {}) {
   const tick = (ok) => (ok ? 'OK ' : 'NO ');
   const area = (a) => !rep.problems.some((p) => a.includes(p.area));
   const out = [
-    `${rep.kind === 'week' ? 'Week' : 'Season'} ${rep.id} · season ${rep.season.id} replayed from ${rep.season.from} to ${rep.season.to}`,
+    rep.kind === 'live'
+      ? `Live board ${rep.id} as of ${rep.asOf} · season ${rep.season.id} replayed from ${rep.season.from} to ${rep.asOf} (the minute from ${rep.asOf} on is still in progress and not compared)`
+      : `${rep.kind === 'week' ? 'Week' : 'Season'} ${rep.id} · season ${rep.season.id} replayed from ${rep.season.from} to ${rep.season.to}`,
     '',
     `${tick(area(['agents']))} agents.json: ${c.agents} agents`,
     `${tick(area(['orders']))} orders: ${c.orderLines} lines signed by the agents' keys, each chained to the one before`,

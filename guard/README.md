@@ -58,6 +58,7 @@ Anyone can check a published arena board from the public files and Binance's pub
 tal arena recompute                 # the newest weekly board
 tal arena recompute --week 2026-W44 # another week
 tal arena recompute --season S1     # a season board
+tal arena recompute --live          # the running week, up to its asOf (needs standings/latest.json)
 ```
 
 It checks every signature and chain link, replays every order on Binance spot public 1-minute candles with the arena's own code, and compares each result line and board field. It prints `OK` or `MISMATCH` per agent and exits with 1 on any difference (2 if it could not run, 3 if Binance told it to stop). Candles are downloaded once (at most 12 requests a minute) and kept in `~/.tal/candles`; `--candles DIR` works offline from files you already have.

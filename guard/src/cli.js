@@ -39,7 +39,7 @@ const T = {
   ${BRAND.short} verify            check the ledger chain and signatures
   ${BRAND.short} replay [--date YYYY-MM-DD]   the day's ledger, line by line
   ${BRAND.short} arena join --name NAME --model MODEL   what to send to sign up for the arena
-  ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID] [--candles DIR]
+  ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID | --live] [--candles DIR]
                      recompute a published arena board from its signed ledgers
                      and Binance public candles, and show anything that differs
   ${BRAND.short} venue [paper|arena]  show or switch where orders go (asks you to type yes)
@@ -79,7 +79,7 @@ const T = {
   ${BRAND.short} verify            核对账本的链和签名
   ${BRAND.short} replay [--date YYYY-MM-DD]   按时间回放那一天的账本
   ${BRAND.short} arena join --name 名字 --model 模型   报名擂台要发的内容
-  ${BRAND.short} arena recompute [--data 目录] [--week YYYY-Www | --season 季] [--candles 目录]
+  ${BRAND.short} arena recompute [--data 目录] [--week YYYY-Www | --season 季 | --live] [--candles 目录]
                      用签名账本和币安公开 K 线复算公开的擂台榜，列出对不上的地方
   ${BRAND.short} venue [paper|arena]  看或换单子发到哪（要你打字确认）
   ${BRAND.short} uninstall [--dry-run]       从代理软件里删掉（账本留着）
@@ -346,7 +346,7 @@ export async function main(argv, io = defaultIo) {
   }
 }
 
-const RECOMPUTE_USAGE = `usage: ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID]
+const RECOMPUTE_USAGE = `usage: ${BRAND.short} arena recompute [--data DIR] [--week YYYY-Www | --season ID | --live]
        [--candles DIR (offline) | --cache DIR] [--arena-key BASE64] [--season-from ISO] [--json] [--verbose]`;
 
 /** Exit codes: 0 everything matches, 1 something differs, 2 cannot recompute, 3 Binance asked us to stop. */
@@ -357,6 +357,12 @@ async function arenaRecompute(f, io, root) {
     return 0;
   }
   const dir = str('data') ?? '.';
+  const live = f.live === true;
+  if (live && (str('week') || str('season'))) {
+    io.err(`${BRAND.short}: --live checks the running week's board (standings/latest.json); leave out --week and --season`);
+    io.err(RECOMPUTE_USAGE);
+    return 2;
+  }
   let arenaKey = str('arena-key');
   if (!arenaKey && existsSync(join(dir, 'config.json'))) {
     try {
@@ -376,7 +382,7 @@ async function arenaRecompute(f, io, root) {
   });
   try {
     const rep = await recompute({
-      dir, week: str('week'), season: str('season'), seasonFrom: str('season-from'), arenaKey, klines,
+      dir, week: str('week'), season: str('season'), seasonFrom: str('season-from'), live, arenaKey, klines,
       progress: (s) => { if (!f.json) io.err(`... ${s}`); },
     });
     if (f.json) io.out(JSON.stringify(rep, null, 2));

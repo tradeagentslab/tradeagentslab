@@ -55,6 +55,15 @@ cd arena && node --test test/*.test.mjs
 
 The tests never touch an exchange: they use made-up market data.
 
+## Workflows (maintainers)
+
+All in `.github/workflows/`, all manual except `check`:
+
+- `check`: the tests, on every push and pull request.
+- `deploy arena worker`: creates the database if missing, adds its tables, and deploys the arena's front door.
+- `publish guard`: publishes the guard to npm (main branch only).
+- `reset arena season`: empties the arena's tables (`arena_*` only, see `arena/worker/reset.sql`) between seasons. It cannot be undone; main branch only, and the confirm box must say `delete S0`. Run it only after the owner has approved it.
+
 ## License
 
 MIT. See [LICENSE](guard/LICENSE).
