@@ -1,0 +1,90 @@
+name: demo gif
+
+# Renders the ~30 s terminal demo (demo/guard-demo.tape) to a GIF and an MP4 and keeps
+# them as a workflow artifact. Manual only. No secrets, no keys, no exchange calls:
+# the guard runs with TAL_OFFLINE=1 (made-up prices) and paper trading.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VHS_VERSION: "0.10.0"
+      VHS_SHA256: b552c3870aca101dcafe533cfef32dceb7b783400ad32642e728775c9f125407
+      TTYD_VERSION: "1.7.7"
+      TTYD_SHA256: 8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55
+      # The agent app `tal init` registers with in the recording. Pinned.
+      AGENT_APP: "@anthropic-ai/claude-code@2.1.250"
+    steps:
+      - uses: actions/checkout@v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5.0.0
+        with:
+          node-version: 24
+
+      - name: Tools (ffmpeg, gifsicle, IBM Plex fonts; ttyd and vhs pinned and checksummed)
+        run: |
+          set -eu
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends ffmpeg gifsicle fonts-ibm-plex
+          curl -fsSLo /tmp/ttyd "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.x86_64"
+          echo "${TTYD_SHA256}  /tmp/ttyd" | sha256sum -c -
+          sudo install -m 755 /tmp/ttyd /usr/local/bin/ttyd
+          curl -fsSLo /tmp/vhs.tgz "https://github.com/charmbracelet/vhs/releases/download/v${VHS_VERSION}/vhs_${VHS_VERSION}_Linux_x86_64.tar.gz"
+          echo "${VHS_SHA256}  /tmp/vhs.tgz" | sha256sum -c -
+          mkdir -p /tmp/vhs && tar -xzf /tmp/vhs.tgz -C /tmp/vhs
+          sudo install -m 755 "$(find /tmp/vhs -type f -name vhs | head -n 1)" /usr/local/bin/vhs
+          ttyd --version
+          vhs --version
+          fc-list | grep -i "IBM Plex Mono" | head -n 1
+
+      - name: A clean demo home (/home/you) with the agent app and this checkout's guard
+        run: |
+          set -eu
+          sudo mkdir -p /home/you
+          sudo chown "$(id -u):$(id -g)" /home/you
+          npm install -g --no-fund --no-audit --prefix /home/you/.local "$AGENT_APP"
+          npm install -g --no-fund --no-audit --prefix /home/you/.local ./guard
+          PATH=/home/you/.local/bin:$PATH HOME=/home/you tal --version
+
+      - name: Record
+        run: |
+          set -eu
+          mkdir -p demo/out
+          vhs demo/guard-demo.tape
+
+      - name: Shrink the GIF
+        run: |
+          set -eu
+          gifsicle -O3 --lossy=30 --colors 64 demo/out/guard-demo.gif -o demo/out/guard-demo.small.gif
+          mv demo/out/guard-demo.small.gif demo/out/guard-demo.gif
+          ls -l demo/out
+          SIZE=$(stat -c %s demo/out/guard-demo.gif)
+          echo "GIF: $SIZE bytes" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SIZE" -gt 2097152 ]; then echo "::warning::GIF is over 2 MB ($SIZE bytes)"; fi
+
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: guard-demo
+          path: demo/out/
+          retention-days: 30
+
+      # The recording must show the real refusals; the text capture is what VHS saw on screen.
+      - name: Check what the recording shows
+        run: |
+          set -eu
+          T=demo/out/guard-demo.txt
+          for s in "✓ claude:" "paper · running" "✓ status: accepted" "REJECTED (max_order)" \
+                   "REJECTED (symbol)" "HALTED: Stop for today." "REJECTED (halted)" \
+                   "Paper trading. Past results do not predict the future. Not investment advice."; do
+            if grep -qF -- "$s" "$T"; then echo "ok: $s"; else echo "::error::not on screen: $s"; FAIL=1; fi
+          done
+          test -z "${FAIL:-}"

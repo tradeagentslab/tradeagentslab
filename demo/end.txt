@@ -1,0 +1,10 @@
+
+  TradeAgents Lab guard: hard limits, a kill switch and a signed ledger
+  between any AI trading agent and the market. Open source (MIT), no keys.
+
+    npx -y @tradeagentslab/guard init
+
+  github.com/tradeagentslab/tradeagentslab  ·  tradeagentslab.com
+
+  Paper trading. Past results do not predict the future. Not investment advice.
+

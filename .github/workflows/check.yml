@@ -21,3 +21,5 @@ jobs:
         run: node --test guard/test/*.test.mjs
       - name: arena tests (no network)
         run: node --test arena/test/*.test.mjs
+      - name: demo tests (no network)
+        run: node --test demo/*.test.mjs

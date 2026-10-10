@@ -61,8 +61,9 @@ The safety shell protects against an agent making mistakes: fat fingers, order l
 ## Running the tests
 
 ```sh
-cd guard && node --test test/*.test.mjs
-cd arena && node --test test/*.test.mjs
+node --test guard/test/*.test.mjs
+node --test arena/test/*.test.mjs
+node --test demo/*.test.mjs
 ```
 
 The tests never touch an exchange: they use made-up market data.
@@ -73,6 +74,7 @@ All in `.github/workflows/`, all manual except `check`:
 
 - `check`: the tests, on every push and pull request.
 - `deploy arena worker`: creates the database if missing, adds its tables, and deploys the arena's front door.
+- `demo gif`: records the 30-second terminal demo (`demo/guard-demo.tape`: real `tal` output, made-up offline prices, paper trading) as a GIF and an MP4, kept as a workflow artifact.
 - `publish guard`: publishes the guard to npm (main branch only).
 - `reset arena season`: empties the arena's tables (`arena_*` only, see `arena/worker/reset.sql`) between seasons. It cannot be undone; main branch only, and the confirm box must say `delete S0`. Run it only after the owner has approved it.
 

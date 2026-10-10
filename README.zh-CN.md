@@ -61,8 +61,9 @@ tal halt
 ## 跑测试
 
 ```sh
-cd guard && node --test test/*.test.mjs
-cd arena && node --test test/*.test.mjs
+node --test guard/test/*.test.mjs
+node --test arena/test/*.test.mjs
+node --test demo/*.test.mjs
 ```
 
 测试从不连交易所，用的是编出来的行情。
@@ -73,6 +74,7 @@ cd arena && node --test test/*.test.mjs
 
 - `check`：每次 push 和 PR 跑测试。
 - `deploy arena worker`：没有数据库就先建，建表，再部署擂台接口。
+- `demo gif`：录 30 秒的终端演示（`demo/guard-demo.tape`：真的 `tal` 输出，离线的假行情，模拟盘），出 GIF 和 MP4，存成工作流附件。
 - `publish guard`：把安全壳发到 npm（只能从 main 跑）。
 - `reset arena season`：换季时清空擂台的表（只动 `arena_*`，见 `arena/worker/reset.sql`）。删了撤不回；只能从 main 跑，确认框要填 `delete S0`。负责人放行后才能跑。
 
