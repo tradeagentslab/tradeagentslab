@@ -76,3 +76,57 @@ test('the engine restarts from its saved state and carries on', async () => {
   await again.once();
   assert.equal(again.arena.minute, before + 3 * 60_000);
 });
+
+test('settled_to on /health: null before the season, follows the engine in season, null once the season closed', async () => {
+  const w = world({ season: { id: 'S1', from: T0 + 10 * 60_000, to: T0 + 20 * 60_000 } });
+  w.clock.t = T0;
+  await w.loop.once();
+  assert.equal((await w.get('/health')).settled_to, null, 'season not started');
+  w.clock.t = T0 + 15 * 60_000 + 25_000;
+  await w.catchUp();
+  // Settled every minute before 15:00 minus one (the newest finished minute waits 20 s)
+  assert.equal(w.loop.arena.minute, T0 + 14 * 60_000);
+  assert.equal((await w.get('/health')).settled_to, new Date(T0 + 15 * 60_000).toISOString());
+  assert.equal((await w.get('/standings/latest.json')).asOf, (await w.get('/health')).settled_to, 'same as the live board');
+  w.clock.t = T0 + 21 * 60_000 + 25_000;
+  await w.catchUp();
+  assert.equal(w.loop.arena.seasonClosed, true);
+  assert.equal((await w.get('/health')).settled_to, null, 'season over');
+});
+
+test('a missing candle: settled_to stops at that minute while engine_seen stays fresh; one log line after 5 min, then every 30 min', async () => {
+  const w = world();
+  w.clock.t = T0 + 3 * 60_000 + 25_000;
+  await w.catchUp();
+  const gap = w.loop.arena.minute + 60_000; // the next minute to settle
+  assert.equal((await w.get('/health')).settled_to, new Date(gap).toISOString());
+  const candles = w.loop.market.candles;
+  w.loop.market.candles = async (s, interval, opts) => {
+    const r = await candles(s, interval, opts);
+    return s === 'SOLUSDT' && interval === '1m' ? { ...r, candles: r.candles.filter((k) => k.t !== gap) } : r;
+  };
+  const stuck = () => w.logs.filter((l) => l.startsWith('settling stuck'));
+  const start = w.clock.t;
+  // Rounds every 20 s for 40 minutes
+  while (w.clock.t < start + 40 * 60_000) {
+    w.clock.t += 20_000;
+    await w.loop.once();
+    const h = await w.get('/health');
+    assert.equal(h.settled_to, new Date(gap).toISOString());
+    assert.equal(h.engine_seen, new Date(w.clock.t).toISOString());
+    if (w.clock.t - start <= 5 * 60_000) assert.equal(stuck().length, 0, 'not within the first 5 minutes');
+  }
+  assert.equal(stuck().length, 2, 'after 5 min, and again 30 min later');
+  const at = new Date(gap).toISOString();
+  assert.equal(stuck()[0], `settling stuck at ${at} for 5 min: no 1-minute candle from Binance for SOLUSDT`);
+  assert.ok(stuck()[1].startsWith(`settling stuck at ${at} for 35 min: `), stuck()[1]);
+  assert.ok(!w.logs.some((l) => l.startsWith('http ')), 'the http log lines go to the other stream, untouched');
+  // The candle turns up: settling moves on, no more lines
+  w.loop.market.candles = candles;
+  for (let i = 0; i < 6; i++) {
+    w.clock.t += 20_000;
+    await w.loop.once();
+  }
+  assert.ok(Date.parse((await w.get('/health')).settled_to) > gap);
+  assert.equal(stuck().length, 2);
+});

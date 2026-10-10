@@ -40,6 +40,10 @@ import { BannedError, createBinanceGate, DEFAULT_PAUSE_DIR, loggedFetch } from '
 const SETTLE_LAG_MS = 20_000; // wait this long past a minute before settling it
 const MAX_CANDLES = 300; // per request; a long gap is caught up over several rounds
 const MAX_PENDING_EVENTS = 5000;
+// Settling stuck on one minute (most likely Binance lacks that 1-minute candle for a symbol):
+// log once after this much wall time, then again every STALL_LOG_EVERY_MS.
+export const STALL_LOG_AFTER_MS = 5 * 60_000;
+export const STALL_LOG_EVERY_MS = 30 * 60_000;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
@@ -283,6 +287,36 @@ export class EngineLoop {
     return this.s.snapshot;
   }
 
+  /**
+   * How far the season is settled: the end of the last settled minute, which is also the
+   * open time of the next minute to settle (same as the live board's asOf). ISO string;
+   * null before the season starts and once it has closed.
+   */
+  settledTo() {
+    const a = this.arena;
+    if (a.seasonClosed || this.now() < a.season.from) return null;
+    return new Date(a.minute == null ? Math.floor(a.season.from / MINUTE) * MINUTE : a.minute + MINUTE).toISOString();
+  }
+
+  /** One log line when settling has been stuck on the same minute for a while (then every 30 min). */
+  _watchStall(candles) {
+    const to = this.settledTo();
+    const now = this.now();
+    if (to == null) {
+      this._stall = null;
+      return;
+    }
+    if (this._stall?.to !== to) this._stall = { to, since: now, next: now + STALL_LOG_AFTER_MS, missing: null };
+    const m = Date.parse(to);
+    if (candles) this._stall.missing = this.arena.symbols.filter((s) => candles.open(s, m) === undefined || candles.close(s, m) === undefined);
+    if (now <= this._stall.next) return;
+    this._stall.next = now + STALL_LOG_EVERY_MS;
+    const { missing } = this._stall;
+    const why = missing == null ? 'no candles fetched yet (Binance budget or pause)'
+      : missing.length ? `no 1-minute candle from Binance for ${missing.join(', ')}` : 'candles are there; check the engine';
+    this.log(`settling stuck at ${to} for ${Math.floor((now - this._stall.since) / MINUTE)} min: ${why}`);
+  }
+
   _bundle() {
     const a = this.arena;
     const blobs = { 'standings/latest': a.standings('week', { source: this.c.source }) };
@@ -295,6 +329,7 @@ export class EngineLoop {
       ts: new Date(this.now()).toISOString(),
       // A clock-based number that only goes up, so a retry after a lost reply is never "stale".
       push: Math.max(this.s.push + 1, this.now()),
+      settledTo: this.settledTo(), // for the Worker's /health only; not published as data
       events: this.s.pending,
       blobs,
     };
@@ -321,6 +356,7 @@ export class EngineLoop {
     }
     const before = this.arena.minute;
     if (candles) this._record(this.arena.advance(this.now() - SETTLE_LAG_MS, candles));
+    this._watchStall(candles);
     try {
       await this._snapshot();
     } catch (err) {

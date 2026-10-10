@@ -134,3 +134,22 @@ test('requests from mainland China get 451 with one line, whatever the path or m
     assert.match(await res.text(), /<p>本站不向中国大陆提供服务。<\/p>/);
   }
 });
+
+test('/health: engine_seen and settled_to (how far the engine has settled; null outside the season)', async () => {
+  const t = setup();
+  assert.deepEqual(await (await t.get('/health')).json(), { ok: true, engine_seen: null, settled_to: null });
+  assert.equal((await t.pushBundle({ settledTo: '2026-10-28T06:00:00.000Z' })).status, 200);
+  assert.deepEqual(await (await t.get('/health')).json(), { ok: true, engine_seen: '2026-10-28T06:00:10.000Z', settled_to: '2026-10-28T06:00:00.000Z' });
+  // An engine that does not send the field leaves it as it was
+  assert.equal((await t.pushBundle({})).status, 200);
+  assert.equal((await (await t.get('/health')).json()).settled_to, '2026-10-28T06:00:00.000Z');
+  for (const bad of ['soon', 123, {}]) assert.equal((await t.pushBundle({ settledTo: bad })).status, 400, `refused: ${JSON.stringify(bad)}`);
+  assert.equal((await (await t.get('/health')).json()).settled_to, '2026-10-28T06:00:00.000Z');
+  // Season over (or not started): null
+  assert.equal((await t.pushBundle({ settledTo: null })).status, 200);
+  assert.equal((await (await t.get('/health')).json()).settled_to, null);
+  // Not part of any published file
+  const standings = { schema: 'arena.standings/v0', rows: [] };
+  await t.pushBundle({ settledTo: '2026-10-28T06:01:00.000Z', blobs: { 'standings/latest': standings } });
+  assert.deepEqual(await (await t.get('/standings/latest.json')).json(), standings);
+});

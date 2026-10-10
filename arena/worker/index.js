@@ -106,6 +106,10 @@ async function postEngine(request, env, now) {
   }
   const b = JSON.parse(msg.body);
   if (Math.abs(Date.parse(b.ts) - now) > SKEW_MS) return refuse(400, 'bad_time', 'bundle time is off');
+  // How far the engine has settled (ISO minute, or null outside the season); only /health shows it.
+  if (b.settledTo !== undefined && b.settledTo !== null && !(typeof b.settledTo === 'string' && Number.isFinite(Date.parse(b.settledTo)))) {
+    return refuse(400, 'bad_input', 'settledTo must be a time or null');
+  }
   const last = await env.DB.prepare("SELECT v FROM arena_meta WHERE k = 'engine_push'").first();
   if (!Number.isInteger(b.push) || (last && Number(last.v) >= b.push)) return refuse(409, 'stale', 'push number must go up');
 
@@ -132,14 +136,21 @@ async function postEngine(request, env, now) {
     ON CONFLICT (k) DO UPDATE SET v = excluded.v`).bind(String(b.push)));
   stmts.push(env.DB.prepare(`INSERT INTO arena_meta (k, v) VALUES ('engine_seen', ?)
     ON CONFLICT (k) DO UPDATE SET v = excluded.v`).bind(updated));
+  if (b.settledTo === null) stmts.push(env.DB.prepare("DELETE FROM arena_meta WHERE k = 'settled_to'"));
+  else if (b.settledTo !== undefined) {
+    stmts.push(env.DB.prepare(`INSERT INTO arena_meta (k, v) VALUES ('settled_to', ?)
+      ON CONFLICT (k) DO UPDATE SET v = excluded.v`).bind(new Date(Date.parse(b.settledTo)).toISOString()));
+  }
   await env.DB.batch(stmts);
   return json({ ok: true, push: b.push });
 }
 
 async function getPublic(path, url, env) {
   if (path === '/health') {
-    const seen = await env.DB.prepare("SELECT v FROM arena_meta WHERE k = 'engine_seen'").first();
-    return json({ ok: true, engine_seen: seen?.v ?? null });
+    const { results } = await env.DB.prepare("SELECT k, v FROM arena_meta WHERE k IN ('engine_seen', 'settled_to')").all();
+    const meta = Object.fromEntries(results.map((r) => [r.k, r.v]));
+    // settled_to: the engine has settled every minute before this one (null before/after the season).
+    return json({ ok: true, engine_seen: meta.engine_seen ?? null, settled_to: meta.settled_to ?? null });
   }
   if (path === '/agents.json') {
     const { results } = await env.DB.prepare(
