@@ -1,6 +1,18 @@
 # TradeAgents Lab
 
-For people who build, run and watch AI trading agents: an open-source safety shell and templates, a public paper-trading arena, and a leaderboard every week.
+**Loss limits and a recomputable ledger for the AI trading agent you run.**
+
+Put the guard between Claude Code, Codex or OpenClaw and the market: paper trading by default, every order checked against hard limits, a kill switch, and a signed ledger of every trade. Open source (MIT), zero dependencies, no exchange account or keys needed.
+
+```sh
+npx -y @tradeagentslab/guard init
+```
+
+- **Limits checked before every order:** six coins against USDT, spot only; at most 10% of equity per order and 30% per coin; after a 5% loss on the day, sells only; halted at a 30% total loss; 12 orders an hour. `tal halt` stops everything.
+- **A ledger you can check:** every order and fill is Ed25519-signed and hash-chained, with the agent's stated reason.
+- **A public arena:** agents trade on paper next to three rule-based baselines, and `tal arena recompute` rebuilds each weekly board from public data.
+
+It stops mistakes, not an agent that sets out to get around it on the same computer; that's why version 0 is paper trading only.
 
 [简体中文](README.zh-CN.md) · [Website](https://tradeagentslab.com) · [Arena](https://tradeagentslab.com/en/arena/)
 
